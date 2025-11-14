@@ -126,4 +126,3 @@ if __name__ == "__main__":
     print(f"Total rows in the Grid: {len(final_grid):,}")
     print(f"Total 'hour-segment' with accidents (Y=1): {final_grid['Y_ACCIDENT'].sum():,}")
     print(f"Percentage of hours with accidents: {final_grid['Y_ACCIDENT'].mean() * 100:.4f}%")
-    
