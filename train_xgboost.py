@@ -6,7 +6,7 @@ from sklearn.metrics import classification_report, confusion_matrix, roc_auc_sco
 import joblib
 
 DATA_FILE = 'data/AP7_Final_Training_Set.csv'
-MODEL_FILE = 'models/accident_xgboost_V2.pkl'
+MODEL_FILE = 'models/accident_xgboost.pkl'
 
 print("Loading data...")
 df = pd.read_csv(DATA_FILE)

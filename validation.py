@@ -7,7 +7,7 @@ from sklearn.metrics import roc_curve, auc, confusion_matrix, accuracy_score, re
 
 # --- CONFIG ---
 DATA_FILE = 'data/AP7_Final_Training_Set.csv'
-MODEL_FILE = 'models/accident_xgboost_V2.pkl'
+MODEL_FILE = 'models/accident_xgboost.pkl'
 
 # Load model and data
 print("Loading model and data...")

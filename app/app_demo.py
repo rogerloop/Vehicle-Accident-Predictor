@@ -11,7 +11,7 @@ import os
 #! EJECUTAR CON ESTE COMANDO: streamlit run app/app_demo.py (NO COMO PYTHON NORMAL)
 
 # --- CONFIGURACIÓN DE RUTAS ---
-MODEL_PATH = 'models/accident_xgboost_V2.pkl'
+MODEL_PATH = 'models/accident_xgboost.pkl'
 MAPPINGS_PATH = 'data/category_mappings.json'
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
