@@ -11,7 +11,7 @@ import os
 #! EJECUTAR CON ESTE COMANDO: streamlit run app/app_demo.py (NO COMO PYTHON NORMAL)
 
 # --- CONFIGURACIÓN DE RUTAS ---
-MODEL_PATH = 'models/accident_xgboost.pkl'
+MODEL_PATH = 'models/accident_xgboost_V2.pkl'
 MAPPINGS_PATH = 'data/category_mappings.json'
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
@@ -107,7 +107,7 @@ def predict_risk_real(model, df_segments, clima, hora, fecha):
     X_input['dow_sin'] = dow_sin
     X_input['dow_cos'] = dow_cos
     
-    # Meteo (Simulación de persistencia)
+    # Meteo 
     X_input['temperature'] = 15.0 
     if 11 <= month <= 2: X_input['temperature'] = 5.0 
     if 6 <= month <= 8: X_input['temperature'] = 25.0 
@@ -118,13 +118,20 @@ def predict_risk_real(model, df_segments, clima, hora, fecha):
     X_input['is_foggy'] = 1 if clima['niebla'] else 0
     X_input['is_daylight'] = 1 if clima['luz'] else 0
     
+    #* Calculamos las interacciones igual que en el training
+    X_input['rain_and_night'] = X_input['precipitation'] * (1 - X_input['is_daylight'])
+    
+    # Tramos del Ebre: 290, 300, 310, 320, 330
+    tramos_ebre = [290, 300, 310, 320, 330]
+    X_input['wind_and_ebre'] = X_input['wind_speed'] * X_input['segmento_pk'].isin(tramos_ebre).astype(int)
+
     # Orden Exacto
     expected_cols = [
         'segmento_pk', 
         'C_VELOCITAT_VIA', 'D_TRACAT_ALTIMETRIC', 'D_TIPUS_VIA', 'D_SENTITS_VIA',
         'hour_sin', 'hour_cos', 'month_sin', 'month_cos', 'dow_sin', 'dow_cos',
         'temperature', 'humidity', 'wind_speed', 'precipitation',
-        'is_foggy', 'is_daylight'
+        'is_foggy', 'is_daylight', 'rain_and_night', 'wind_and_ebre'
     ]
     
     try:
@@ -178,20 +185,14 @@ if model is not None:
 
     df_tramos['probabilidad'] = riesgos_actuales
 
-    # APLICAR FILTRO PK 
-    pk_low, pk_high = rango_pk
-    df_tramos = df_tramos[
-        (df_tramos['segmento_pk'] >= pk_low) &
-        (df_tramos['segmento_pk'] <= pk_high)
-    ]
-    
-    riesgos_actuales = predict_risk_real(model, df_tramos, clima_dict, hora, fecha)
-
-    if len(riesgos_actuales) == len(df_tramos):
+    if len(riesgos_actuales) > 0:
         df_tramos['probabilidad'] = riesgos_actuales
+
+        # Filtro PK
+        df_tramos = df_tramos[(df_tramos['segmento_pk'] >= pk_min) & (df_tramos['segmento_pk'] <= pk_max)]
         
         def get_color(p):
-            if p > 0.80: return 'darkred'
+            if p > 0.90: return 'darkred'
             if p > 0.60: return 'red'
             if p > 0.40: return 'orange'
             if p > 0.20: return 'yellow'

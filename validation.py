@@ -3,16 +3,20 @@ import numpy as np
 import joblib
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import roc_auc_score, confusion_matrix
+from sklearn.metrics import roc_curve, auc, confusion_matrix, accuracy_score, recall_score
 
 # --- CONFIG ---
 DATA_FILE = 'data/AP7_Final_Training_Set.csv'
-MODEL_FILE = 'models/accident_xgboost.pkl'
+MODEL_FILE = 'models/accident_xgboost_V2.pkl'
 
 # Load model and data
 print("Loading model and data...")
 model = joblib.load(MODEL_FILE)
 df = pd.read_csv(DATA_FILE)
+
+# INGENIERIA DE CARACTERÍSTICAS (MISMOS PASOS QUE EN ENTRENAMIENTO)
+df['rain_and_night'] = df['precipitation'] * (1 - df['is_daylight'])
+df['wind_and_ebre'] = df['wind_speed'] * df['segmento_pk'].isin([290, 300, 310, 320, 330]).astype(int)
 
 # Prepare data (Same split as training for consistency)
 X = df.drop(columns=['Y_ACCIDENT', 'timestamp_hora', 'station_id'])
@@ -24,90 +28,119 @@ split_index = int(len(df) * 0.8)
 X_test = X.iloc[split_index:]
 y_test = y.iloc[split_index:]
 time_test = timestamp.iloc[split_index:]
+df_test_full = df.iloc[split_index:].copy()
 
 print(f"Validating with {len(X_test)} samples ({time_test.min()} to {time_test.max()})")
 
 # --- PREDICTIONS ---
 print("Generating predictions...")
-probs = model.predict_proba(X_test)[:, 1]
+probs = model.predict_proba(X_test)[:, 1] # Probabilidad de accidente
 
-# Optimal threshold (from previous output)
-THRESHOLD = 0.231195
+THRESHOLD = 0.5
+y_pred = (probs > THRESHOLD).astype(int)
+# Guardar probabilidades en el DataFrame para análisis
+df_test_full['probabilidad'] = probs
 
-# Create results DataFrame
-results = pd.DataFrame({
-    'timestamp': time_test,
-    'probabilidad': probs,
-    'real_accident': y_test
-})
 
-# Add Risk Level
-results['nivel_riesgo'] = pd.cut(
-    results['probabilidad'], 
-    bins=[-1, 0.10, THRESHOLD, 1.0], 
-    labels=['Green', 'Yellow', 'Red']
+# -- VISUALIZACIONES --
+plt.style.use('seaborn-v0_8-whitegrid')
+fig = plt.figure(figsize=(20, 12))
+fig.suptitle(f'Model Diagnosis (Threshold: {THRESHOLD})', fontsize=16)
+
+# --- CURVA ROC + TABLA MÉTRICAS ---
+ax1 = plt.subplot(2, 3, 1)
+fpr, tpr, _ = roc_curve(y_test, probs)
+roc_auc = auc(fpr, tpr)
+
+# Calcular métricas
+acc = accuracy_score(y_test, y_pred)
+# Recall Positivo (Sensibilidad): Cuántos accidentes reales detectamos
+recall_pos = recall_score(y_test, y_pred, pos_label=1)
+# Recall Negativo (Especificidad): Cuántos NO accidentes clasificamos bien
+recall_neg = recall_score(y_test, y_pred, pos_label=0)
+
+ax1.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
+ax1.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+ax1.set_xlim([0.0, 1.0])
+ax1.set_ylim([0.0, 1.05])
+ax1.set_xlabel('False Positive Rate')
+ax1.set_ylabel('True Positive Rate')
+ax1.set_title('ROC Curve & Performance')
+ax1.legend(loc="lower right")
+
+# Tabla de Métricas dentro del gráfico
+metrics_text = (
+    f"Accuracy: {acc:.1%}\n"
+    f"AUC:      {roc_auc:.3f}\n"
+    f"Recall (+): {recall_pos:.1%} (Accidentes)\n"
+    f"Recall (-): {recall_neg:.1%} (Normalidad)"
 )
+ax1.text(0.5, 0.3, metrics_text, transform=ax1.transAxes, fontsize=10,
+         bbox=dict(boxstyle="round,pad=0.5", fc="white", ec="gray", alpha=0.8))
 
-# Does the model discriminate well? 
-print("\n--- Discrimination Analysis ---")
-avg_prob_accident = results[results['real_accident'] == 1]['probabilidad'].mean()
-avg_prob_normal = results[results['real_accident'] == 0]['probabilidad'].mean()
+# --- CONFUSION MATRIX ---
+ax2 = plt.subplot(2, 3, 2)
+cm = confusion_matrix(y_test, y_pred)
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax2, cbar=False)
+ax2.set_title('Matriz de Confusión')
+ax2.set_xlabel('Predicción')
+ax2.set_ylabel('Realidad')
+ax2.set_xticklabels(['Normal', 'Accidente'])
+ax2.set_yticklabels(['Normal', 'Accidente'])
 
-print(f"Average probability when accident occurs: {avg_prob_accident:.4f}")
-print(f"Average probability when no accident occurs: {avg_prob_normal:.4f}")
-factor = avg_prob_accident / avg_prob_normal
-print(f"The model assigns {factor:.1f} times more risk to accident situations.")
+# ---  IMPACTO DE LA LLUVIA  ---
+ax3 = plt.subplot(2, 3, 3)
+# Crear bins de lluvia para ver la tendencia
+bins = [-0.1, 0, 0.5, 2, 5, 100]
+labels = ['Seco (0)', 'Llovizna (<0.5)', 'Lluvia (0.5-2)', 'Intensa (2-5)', 'Tormenta (>5)']
+df_test_full['rain_cat'] = pd.cut(df_test_full['precipitation'], bins=bins, labels=labels)
 
-# Density Plot
-plt.figure(figsize=(10, 6))
-sns.kdeplot(data=results[results['real_accident'] == 0], x='probabilidad', label='No Accident', fill=True, alpha=0.3)
-sns.kdeplot(data=results[results['real_accident'] == 1], x='probabilidad', label='Real Accident', color='red', fill=True, alpha=0.3)
-plt.axvline(THRESHOLD, color='black', linestyle='--', label=f'Threshold ({THRESHOLD:.2f})')
-plt.title('Probability Distribution: Accidents vs Normality')
-plt.xlabel('Predicted Risk Probability')
-plt.legend()
-plt.savefig('validation_density.png')
-print("Saved: validation_density.png")
+# Calcular probabilidad media por categoría de lluvia
+rain_analysis = df_test_full.groupby('rain_cat', observed=False)['probabilidad'].mean()
 
-# Weekly Heat Map (Risk Heatmap)
-# Aggregate risk by Day of Week and Hour
-results['hour'] = results['timestamp'].dt.hour
-results['dow'] = results['timestamp'].dt.dayofweek
+# Colores: Verde a Rojo según riesgo
+colors = plt.cm.RdYlGn_r(rain_analysis / rain_analysis.max())
+bars = rain_analysis.plot(kind='bar', ax=ax3, color=colors, edgecolor='black')
+ax3.set_title('Riesgo Medio Predicho vs. Intensidad Lluvia')
+ax3.set_ylabel('Probabilidad Promedio')
+ax3.set_xlabel('Precipitación (mm)')
+ax3.grid(axis='y', linestyle='--', alpha=0.7)
 
-heatmap_data = results.pivot_table(
-    index='dow', 
-    columns='hour', 
-    values='probabilidad', 
-    aggfunc='mean'
-)
+# Añadir etiquetas de valor encima de las barras
+for p in bars.patches:
+    ax3.annotate(f'{p.get_height():.2f}', (p.get_x() + p.get_width() / 2., p.get_height()),
+                 ha='center', va='center', xytext=(0, 5), textcoords='offset points')
 
-days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+# --- MAPA DE CALOR (HORA vs DÍA) ---
+ax4 = plt.subplot(2, 3, 4)
+df_test_full['hour'] = time_test.dt.hour
+df_test_full['dow'] = time_test.dt.dayofweek
+heatmap_data = df_test_full.pivot_table(index='dow', columns='hour', values='probabilidad', aggfunc='mean')
+days = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
+sns.heatmap(heatmap_data, cmap='YlOrRd', yticklabels=days, ax=ax4)
+ax4.set_title('Mapa de Calor: Riesgo por Hora y Día')
 
-plt.figure(figsize=(12, 6))
-sns.heatmap(heatmap_data, cmap='YlOrRd', yticklabels=days)
-plt.title('Heat Map of Predicted Accident Risk by Day of Week and Hour')
-plt.xlabel('Hour of Day')
-plt.ylabel('Day of Week')
-plt.savefig('validation_heatmap.png')
-print("Saved: validation_heatmap.png")
+# --- RIESGO POR TRAMO ---
+ax5 = plt.subplot(2, 3, (5, 6)) # Ocupa 2 espacios
+risk_by_segment = df_test_full.groupby('segmento_pk')['probabilidad'].mean()
+risk_by_segment.plot(kind='bar', ax=ax5, color='skyblue', edgecolor='grey')
+ax5.set_title('Riesgo Medio por Kilómetro (Segmento)')
+ax5.set_ylabel('Probabilidad')
 
-# Segment Validation (Where does it see more danger?) 
-# Recover segmento_pk from original dataframe
-X_test_with_pk = X_test.copy()
-X_test_with_pk['segmento_pk'] = df.iloc[split_index:]['segmento_pk']
-X_test_with_pk['probabilidad'] = probs
+plt.tight_layout()
+plt.savefig('validation_dashboard_complete2.png', dpi=300)
+print("\n Diagnóstico completado. Imagen guardada: validation_dashboard_complete.png")
 
-risk_by_segment = X_test_with_pk.groupby('segmento_pk')['probabilidad'].mean().sort_values(ascending=False)
-
-print("\n--- Top 5 Most Dangerous Segments (according to model) ---")
-print(risk_by_segment.head(5))
-
-plt.figure(figsize=(12, 4))
-risk_by_segment.sort_index().plot(kind='bar', color='lightblue')
-plt.title('Risk by Road Segment (Average Predicted Probability)')
-plt.ylabel('Average Probability')
-plt.xlabel('Road Segment Kilometer (segmento_pk)')
-plt.savefig('validation_segments.png')
-print("Saved: validation_segments.png")
+# --- INFORME DE LLUVIA EN TEXTO ---
+print("\n--- 🌧️ ANÁLISIS DE SENSIBILIDAD A LA LLUVIA ---")
+print(rain_analysis)
+print("-" * 40)
+if rain_analysis.iloc[-1] > 0.80:
+    print(" DIAGNÓSTICO: El modelo es HIPERSENSIBLE. Riesgo > 80% con lluvia fuerte.")
+    print("   -> Solución: Re-entrenar con más regularización (reg_alpha) o bajar scale_pos_weight.")
+elif rain_analysis.iloc[-1] < 0.50:
+    print(" DIAGNÓSTICO: El modelo es TOLERANTE. El riesgo sube pero no satura.")
+else:
+    print(" DIAGNÓSTICO: El modelo es equilibrado.")
 
 print("\nValidation completed. Check the generated images.")
