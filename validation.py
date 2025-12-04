@@ -14,10 +14,6 @@ print("Loading model and data...")
 model = joblib.load(MODEL_FILE)
 df = pd.read_csv(DATA_FILE)
 
-# INGENIERIA DE CARACTERÍSTICAS (MISMOS PASOS QUE EN ENTRENAMIENTO)
-df['rain_and_night'] = df['precipitation'] * (1 - df['is_daylight'])
-df['wind_and_ebre'] = df['wind_speed'] * df['segmento_pk'].isin([290, 300, 310, 320, 330]).astype(int)
-
 # Prepare data (Same split as training for consistency)
 X = df.drop(columns=['Y_ACCIDENT', 'timestamp_hora', 'station_id'])
 y = df['Y_ACCIDENT']
