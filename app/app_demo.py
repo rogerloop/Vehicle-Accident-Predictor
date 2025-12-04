@@ -136,8 +136,8 @@ def predict_risk_real(model, df_segments, clima, hora, fecha):
 
 # --- UI SIDEBAR ---
 with st.sidebar:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/6/62/Logo_Mossos_d%27Esquadra.svg/1200px-Logo_Mossos_d%27Esquadra.svg.png", width=100)
-    st.title("🎛️ Panell de Control")
+    st.image("https://upload.wikimedia.org/wikipedia/commons/8/8a/Logo_dels_Mossos_d%27Esquadra_sense_fons.svg", width=500)
+    st.title("Panell de Control")
     st.markdown("---")
     
     fecha = st.date_input("Data Predicció", datetime.date.today())
@@ -152,6 +152,16 @@ with st.sidebar:
         niebla = st.toggle("Boira", value=False)
         is_day = 7 <= hora <= 20
         luz = st.toggle("Llum de dia", value=is_day)
+    
+    st.markdown("### 🛣️ Rang AP-7 a visualitzar")
+    pk_min = 0
+    pk_max = 340
+    rango_pk = st.slider("Selecciona el rang de PK",
+                         min_value=pk_min,
+                         max_value=pk_max,
+                         value=(pk_min, pk_max),
+                         step=10,
+                         format="PK %d")
 
     clima_dict = {'lluvia': lluvia, 'viento': viento, 'niebla': niebla, 'luz': luz}
     st.markdown("---")
@@ -163,10 +173,21 @@ model, mappings = load_resources()
 if model is not None:
     df_tramos = get_static_segment_data()
     
-    # 1. PREDICCIÓN ACTUAL (NOW)
+    # 1. PREDICCIÓN ACTUAL
     riesgos_actuales = predict_risk_real(model, df_tramos, clima_dict, hora, fecha)
+
+    df_tramos['probabilidad'] = riesgos_actuales
+
+    # APLICAR FILTRO PK 
+    pk_low, pk_high = rango_pk
+    df_tramos = df_tramos[
+        (df_tramos['segmento_pk'] >= pk_low) &
+        (df_tramos['segmento_pk'] <= pk_high)
+    ]
     
-    if len(riesgos_actuales) > 0:
+    riesgos_actuales = predict_risk_real(model, df_tramos, clima_dict, hora, fecha)
+
+    if len(riesgos_actuales) == len(df_tramos):
         df_tramos['probabilidad'] = riesgos_actuales
         
         def get_color(p):
@@ -188,7 +209,7 @@ if model is not None:
         riesgo_medio = df_tramos['probabilidad'].mean() * 100
         alerts = len(df_tramos[df_tramos['probabilidad'] > 0.10])
         
-        with col1: st.metric("Risc Global", f"{riesgo_medio:.1f}%", delta=f"{'⬆️ Alt' if riesgo_medio > 10 else '⬇️ Normal'}")
+        with col1: st.metric("Risc Global",f"{riesgo_medio:.1f}%",delta=("Alt" if riesgo_medio > 27 else ("Normal" if riesgo_medio > 12 else "Baix")),delta_color="inverse" if riesgo_medio > 27 else ("normal" if riesgo_medio > 12 else "off"))
         with col2: st.metric("Alertes Actives", alerts, delta_color="inverse")
         with col3: st.metric("Meteorologia", "Adversa" if (lluvia or niebla) else "Favorable")
         with col4: st.metric("Trànsit", "Hora Punta" if 7 <= hora <= 19 else "Fluid")
@@ -217,7 +238,7 @@ if model is not None:
 
         # --- GRÁFICO TEMPORAL REAL (24 HORAS) ---
         st.markdown("---")
-        st.subheader("📈 Evolució del Risc (Pròximes 24 Hores)")
+        st.subheader("Evolució del Risc (Pròximes 24 Hores)")
         
         with st.spinner("Calculant previsió futura..."):
             future_risks = []
@@ -255,6 +276,7 @@ if model is not None:
                 st.info(f"💡 Atenció: El pic màxim de risc s'espera a les **{max_risk_h}**.")
 
     else:
-        st.warning("Error en la predicción. Revisa los datos de entrada.")
+        st.error("Error: la predicció no coincideix amb el nombre de trams filtrats")
+        st.stop()
 else:
     st.error("No se ha podido cargar el modelo.")
