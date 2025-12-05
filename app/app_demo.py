@@ -44,38 +44,94 @@ st.markdown("""
 # --- CARGA DE RECURSOS ---
 @st.cache_resource
 def load_resources():
+    model = None
+    mappings = None
+    geometry_points = None
+    geojson_layer = None
+
     try:
-        model = joblib.load(MODEL_PATH)
-        with open(MAPPINGS_PATH, 'r') as f:
-            mappings = json.load(f)
-        return model, mappings
-    except FileNotFoundError as e:
-        st.error(f"Error cargando archivos: {e}")
-        return None, None
+        # Cargar Modelo
+        if os.path.exists(MODEL_PATH):
+            model = joblib.load(MODEL_PATH)
+        
+        # Cargar Mappings
+        if os.path.exists(MAPPINGS_PATH):
+            with open(MAPPINGS_PATH, 'r') as f:
+                mappings = json.load(f)
+
+        # Cargar Geometría (NUEVO)
+        geo_path = "data/ap7_geometry.geojson"
+        if os.path.exists(geo_path):
+            with open(geo_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                geojson_layer = data # Guardamos para pintar la línea completa luego
+                
+                # Extraemos y aplanamos todas las coordenadas
+                all_coords = []
+                for feature in data['features']:
+                    geom = feature.get('geometry', {})
+                    if geom.get('type') == 'LineString':
+                        all_coords.extend(geom.get('coordinates', []))
+                
+
+                # Ordenamos los puntos por Latitud descendente (Norte -> Sur) para simular el avance de los PKs
+                # x[1] es latitud, x[0] es longitud
+                if all_coords:
+                    # Filtramos Latitud > 40.52 (Frontera Cataluña-Valencia)
+                    # Esto evita que la línea baje hasta Castellón/Valencia
+                    catalunya_points = [c for c in all_coords if c[1] > 40.52]
+                    
+                    # Ordenamos Norte -> Sur
+                    geometry_points = sorted(catalunya_points, key=lambda x: x[1], reverse=True)
+
+    except Exception as e:
+        st.error(f"Error cargando recursos: {e}")
+    
+    return model, mappings, geometry_points, geojson_layer
 
 # --- DATOS ESTÁTICOS DE TRAMOS ---
-def get_static_segment_data():
+def get_static_segment_data(geometry_points=None):
     segments = []
-    lat_start, lon_start = 42.4, 2.87 
-    lat_end, lon_end = 40.5, 0.5 
-    num_segments = 35 
     
+    # CAMBIO: Aumentamos resolución para que no haya huecos
+    # De 0 a 340 km, saltando de 5 en 5 (69 tramos aprox)
+    step_km = 5  
+    max_pk = 340
+    num_segments = int(max_pk / step_km) 
+    
+    # Fallbacks (por si acaso)
+    lat_start_fb, lon_start_fb = 42.4, 2.87 
+    lat_end_fb, lon_end_fb = 40.5, 0.5 
+
     for i in range(num_segments):
-        pk = i * 10
-        alpha = i / num_segments
+        pk = i * step_km  # PKs: 0, 5, 10, 15...
+        
+        # LÓGICA GEOMETRÍA (Igual que antes)
+        if geometry_points and len(geometry_points) > 100:
+            idx = int((pk / max_pk) * (len(geometry_points) - 1))
+            idx = min(idx, len(geometry_points) - 1)
+            lon_real, lat_real = geometry_points[idx]
+        else:
+            alpha = i / num_segments
+            lat_real = lat_start_fb * (1 - alpha) + lat_end_fb * alpha
+            lon_real = lon_start_fb * (1 - alpha) + lon_end_fb * alpha
+
+        # Asignación de atributos (Simplificada para el ejemplo)
+        velocidad = 120.0
         tipo_via = 1 
         trazado = 0  
         sentido = 1  
-        velocidad = 120.0
         
+        # Ajustamos lógica de tramos especiales a los nuevos PKs
         if 140 <= pk <= 160: velocidad = 100.0 
         if 40 <= pk <= 60: trazado = 1 
         
         segments.append({
             'segmento_pk': pk,
-            'lat': lat_start * (1 - alpha) + lat_end * alpha,
-            'lon': lon_start * (1 - alpha) + lon_end * alpha,
-            'nombre_tramo': f"AP-7 PK {pk}-{pk+10}",
+            'lat': lat_real,
+            'lon': lon_real,
+            # CAMBIO: Nombre del tramo actualizado al step de 5km
+            'nombre_tramo': f"AP-7 PK {pk}-{pk + step_km}",
             'C_VELOCITAT_VIA': velocidad,
             'D_TRACAT_ALTIMETRIC': trazado,
             'D_TIPUS_VIA': tipo_via,
@@ -175,10 +231,10 @@ with st.sidebar:
     st.info("ℹ️ Modifica els paràmetres per veure com canvia el risc en temps real")
 
 # --- LÓGICA MAIN ---
-model, mappings = load_resources()
+model, mappings, geometry_points, geojson_layer = load_resources()
 
 if model is not None:
-    df_tramos = get_static_segment_data()
+    df_tramos = get_static_segment_data(geometry_points)
     
     # 1. PREDICCIÓN ACTUAL
     riesgos_actuales = predict_risk_real(model, df_tramos, clima_dict, hora, fecha)
@@ -192,9 +248,9 @@ if model is not None:
         df_tramos = df_tramos[(df_tramos['segmento_pk'] >= pk_min) & (df_tramos['segmento_pk'] <= pk_max)]
         
         def get_color(p):
-            if p > 0.90: return 'darkred'
-            if p > 0.60: return 'red'
-            if p > 0.40: return 'orange'
+            if p > 0.50: return 'darkred'
+            if p > 0.40: return 'red'
+            if p > 0.30: return 'orange'
             if p > 0.20: return 'yellow'
             if p > 0.05: return 'yellowgreen'
             return 'green'
@@ -220,12 +276,30 @@ if model is not None:
         with col_map:
             st.subheader("🗺️ Mapa de Calor")
             m = folium.Map(location=[41.5, 1.5], zoom_start=8, tiles="CartoDB positron")
-            for _, row in df_tramos.iterrows():
-                folium.Circle(
-                    location=[row['lat'], row['lon']],
-                    radius=4000, color=row['color'], fill=True, fill_opacity=0.7,
-                    popup=f"<b>PK {row['segmento_pk']}</b><br>Risc: {row['probabilidad']:.2%}"
+            # Dibujar trazado real de la AP-7 (linea gris)
+            if geojson_layer:
+                folium.GeoJson(
+                    geojson_layer,
+                    name="Trazado AP-7",
+                    style_function=lambda x: {
+                        'color': '#888888', 
+                        'weight': 4, 
+                        'opacity': 0.5
+                    }
                 ).add_to(m)
+            # Dibujar tramos con riesgo (circulos)    
+            for _, row in df_tramos.iterrows():
+                # Filtramos para dibujar solo lo seleccionado en el slider
+                if pk_min <= row['segmento_pk'] <= pk_max:
+                    folium.Circle(
+                        location=[row['lat'], row['lon']],
+                        radius=4000, 
+                        color=row['color'], 
+                        fill=True, 
+                        fill_opacity=0.8,
+                        popup=f"<b>PK {row['segmento_pk']}</b><br>Risc: {row['probabilidad']:.2%}"
+                    ).add_to(m)
+            
             st_folium(m, width="100%", height=500)
 
         with col_list:
