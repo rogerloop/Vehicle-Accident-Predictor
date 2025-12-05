@@ -35,19 +35,6 @@ print(f"Ratio base: {ratio:.2f}")
 # tolerant_ratio = ratio * 0.8 
 # print(f"Original Ratio: {ratio:.2f} | Ratio used: {tolerant_ratio:.2f}")
 
-# * GRID OF PARAMETERS TO TEST
-# RandomizedSearchCV trys random combinations of these values
-# param_grid = {
-#     'n_estimators': [200, 300, 500],
-#     'max_depth': [4, 6, 8, 10],
-#     'learning_rate': [0.01, 0.03, 0.05, 0.1],
-#     'subsample': [0.7, 0.8, 1.0],              # % of rows used by tree (reduce overfit)
-#     'colsample_bytree': [0.7, 0.8, 1.0],       # % of columns used by tree
-#     'scale_pos_weight': [ratio, ratio * 1.5, ratio * 2.0], # Jugar con la agresividad
-#     'reg_alpha': [0, 0.1, 1.0],                # Regularization L1 (reduce ruido)
-#     'reg_lambda': [1.0, 1.5, 2.0]              # Regularization L2
-# }
-
 # Configuration XGBoost base
 model = XGBClassifier(
     n_estimators=300,
@@ -63,36 +50,6 @@ model = XGBClassifier(
     random_state=42,
     tree_method='hist' # Más rápido para datos grandes
 )
-
-# Config random search (Faster than exhaustive GridSearch)
-# n_iter=20 will try 20 different combinations
-# search = RandomizedSearchCV(
-#     estimator=xgb,
-#     param_distributions=param_grid,
-#     n_iter=20, 
-#     scoring='roc_auc',
-#     cv=3, # Cross-Validation with 3 folds
-#     verbose=1,
-#     n_jobs=1, # 1 job here because XGBoost already uses all cores internally
-#     random_state=42
-# )
-# print(f"Starting hyperparameter search (20 combinations)...")
-# # We train ONLY with a sample of the Train set to go fast (eg. 20%)
-# #? For this example, we use a random sample of 50% of the train to speed up
-# sample_size = int(len(X_train) * 0.5)
-# indices = np.random.choice(len(X_train), sample_size, replace=False)
-# X_train_sample = X_train.iloc[indices]
-# y_train_sample = y_train.iloc[indices]
-
-# search.fit(X_train_sample, y_train_sample)
-
-# print("Best hyperparameters found:")
-# print(search.best_params_)
-# print("Best AUC in validation: {search.best_score_:.4f}")
-
-# # FINAL TRAIN WITH THE BEST HYPERPARAMETERS (with all the train data)
-# print("Training XGBoost...")
-# model = search.best_estimator_
 
 # ENTRENAR
 model.fit(X_train, y_train)
