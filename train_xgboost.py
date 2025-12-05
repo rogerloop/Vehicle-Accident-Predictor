@@ -32,8 +32,8 @@ positives = (y_train == 1).sum()
 ratio = negatives / positives
 print(f"Ratio base: {ratio:.2f}")
 
-tolerant_ratio = ratio * 0.8 
-print(f"Original Ratio: {ratio:.2f} | Ratio used: {tolerant_ratio:.2f}")
+# tolerant_ratio = ratio * 0.8 
+# print(f"Original Ratio: {ratio:.2f} | Ratio used: {tolerant_ratio:.2f}")
 
 # * GRID OF PARAMETERS TO TEST
 # RandomizedSearchCV trys random combinations of these values
@@ -53,12 +53,10 @@ model = XGBClassifier(
     n_estimators=300,
     learning_rate=0.03,     # Aprendizaje lento para ser preciso
     max_depth=5,            # Árboles menos profundos = Menos memorización de reglas simples
-    scale_pos_weight=tolerant_ratio, 
-    
-    # Regularización FUERTE (Para evitar "Si Lluvia -> Alerta")
-    reg_alpha=10.0,         # Regularización L1 alta (elimina ruido)
-    reg_lambda=5.0,         # Regularización L2
-    min_child_weight=10,    # Necesita ver muchos ejemplos para crear una regla
+    scale_pos_weight=ratio,
+    reg_alpha=1.0,         # Regularización L1 alta (elimina ruido)
+    reg_lambda=1.0,         # Regularización L2
+    min_child_weight=5,    # Necesario un mínimo de muestras por regla
     
     eval_metric='auc',
     n_jobs=-1,

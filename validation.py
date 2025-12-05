@@ -84,29 +84,6 @@ ax2.set_ylabel('Realidad')
 ax2.set_xticklabels(['Normal', 'Accidente'])
 ax2.set_yticklabels(['Normal', 'Accidente'])
 
-# ---  IMPACTO DE LA LLUVIA  ---
-ax3 = plt.subplot(2, 3, 3)
-# Crear bins de lluvia para ver la tendencia
-bins = [-0.1, 0, 0.5, 2, 5, 100]
-labels = ['Seco (0)', 'Llovizna (<0.5)', 'Lluvia (0.5-2)', 'Intensa (2-5)', 'Tormenta (>5)']
-df_test_full['rain_cat'] = pd.cut(df_test_full['precipitation'], bins=bins, labels=labels)
-
-# Calcular probabilidad media por categoría de lluvia
-rain_analysis = df_test_full.groupby('rain_cat', observed=False)['probabilidad'].mean()
-
-# Colores: Verde a Rojo según riesgo
-colors = plt.cm.RdYlGn_r(rain_analysis / rain_analysis.max())
-bars = rain_analysis.plot(kind='bar', ax=ax3, color=colors, edgecolor='black')
-ax3.set_title('Riesgo Medio Predicho vs. Intensidad Lluvia')
-ax3.set_ylabel('Probabilidad Promedio')
-ax3.set_xlabel('Precipitación (mm)')
-ax3.grid(axis='y', linestyle='--', alpha=0.7)
-
-# Añadir etiquetas de valor encima de las barras
-for p in bars.patches:
-    ax3.annotate(f'{p.get_height():.2f}', (p.get_x() + p.get_width() / 2., p.get_height()),
-                 ha='center', va='center', xytext=(0, 5), textcoords='offset points')
-
 # --- MAPA DE CALOR (HORA vs DÍA) ---
 ax4 = plt.subplot(2, 3, 4)
 df_test_full['hour'] = time_test.dt.hour
@@ -126,17 +103,5 @@ ax5.set_ylabel('Probabilidad')
 plt.tight_layout()
 plt.savefig('validation_dashboard_complete2.png', dpi=300)
 print("\n Diagnóstico completado. Imagen guardada: validation_dashboard_complete.png")
-
-# --- INFORME DE LLUVIA EN TEXTO ---
-print("\n--- 🌧️ ANÁLISIS DE SENSIBILIDAD A LA LLUVIA ---")
-print(rain_analysis)
-print("-" * 40)
-if rain_analysis.iloc[-1] > 0.80:
-    print(" DIAGNÓSTICO: El modelo es HIPERSENSIBLE. Riesgo > 80% con lluvia fuerte.")
-    print("   -> Solución: Re-entrenar con más regularización (reg_alpha) o bajar scale_pos_weight.")
-elif rain_analysis.iloc[-1] < 0.50:
-    print(" DIAGNÓSTICO: El modelo es TOLERANTE. El riesgo sube pero no satura.")
-else:
-    print(" DIAGNÓSTICO: El modelo es equilibrado.")
 
 print("\nValidation completed. Check the generated images.")

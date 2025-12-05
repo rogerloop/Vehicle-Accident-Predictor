@@ -93,7 +93,7 @@ def load_resources():
 def get_static_segment_data(geometry_points=None):
     segments = []
     
-    # CAMBIO: Aumentamos resolución para que no haya huecos
+    # Aumentamos resolución para que no haya huecos
     # De 0 a 340 km, saltando de 5 en 5 (69 tramos aprox)
     step_km = 5  
     max_pk = 340
@@ -106,7 +106,7 @@ def get_static_segment_data(geometry_points=None):
     for i in range(num_segments):
         pk = i * step_km  # PKs: 0, 5, 10, 15...
         
-        # LÓGICA GEOMETRÍA (Igual que antes)
+        # LÓGICA GEOMETRÍA
         if geometry_points and len(geometry_points) > 100:
             idx = int((pk / max_pk) * (len(geometry_points) - 1))
             idx = min(idx, len(geometry_points) - 1)
@@ -141,61 +141,113 @@ def get_static_segment_data(geometry_points=None):
 
 # --- FUNCIÓN DE PREDICCIÓN REAL ---
 def predict_risk_real(model, df_segments, clima, hora, fecha):
-    # 1. Variables Temporales
-    hour_sin = np.sin(2 * np.pi * hora / 24)
-    hour_cos = np.cos(2 * np.pi * hora / 24)
-    
-    month = fecha.month
-    month_sin = np.sin(2 * np.pi * month / 12)
-    month_cos = np.cos(2 * np.pi * month / 12)
-    
-    dayofweek = fecha.weekday()
-    dow_sin = np.sin(2 * np.pi * dayofweek / 7)
-    dow_cos = np.cos(2 * np.pi * dayofweek / 7)
-    
-    # 2. Construir DataFrame X
-    X_input = df_segments.copy()
-    
-    X_input['hour_sin'] = hour_sin
-    X_input['hour_cos'] = hour_cos
-    X_input['month_sin'] = month_sin
-    X_input['month_cos'] = month_cos
-    X_input['dow_sin'] = dow_sin
-    X_input['dow_cos'] = dow_cos
-    
-    # Meteo 
-    X_input['temperature'] = 15.0 
-    if 11 <= month <= 2: X_input['temperature'] = 5.0 
-    if 6 <= month <= 8: X_input['temperature'] = 25.0 
-    
-    X_input['humidity'] = 75.0 if clima['niebla'] or clima['lluvia'] else 60.0
-    X_input['precipitation'] = 2.0 if clima['lluvia'] else 0.0
-    X_input['wind_speed'] = 15.0 if clima['viento'] else 2.0
-    X_input['is_foggy'] = 1 if clima['niebla'] else 0
-    X_input['is_daylight'] = 1 if clima['luz'] else 0
-    
-    #* Calculamos las interacciones igual que en el training
-    X_input['rain_and_night'] = X_input['precipitation'] * (1 - X_input['is_daylight'])
-    
-    # Tramos del Ebre: 290, 300, 310, 320, 330
-    tramos_ebre = [290, 300, 310, 320, 330]
-    X_input['wind_and_ebre'] = X_input['wind_speed'] * X_input['segmento_pk'].isin(tramos_ebre).astype(int)
+    """
+    Construye todas las features que el modelo XGBoost requiere
+    y devuelve las probabilidades de accidente para cada tramo.
+    """
 
-    # Orden Exacto
-    expected_cols = [
-        'segmento_pk', 
-        'C_VELOCITAT_VIA', 'D_TRACAT_ALTIMETRIC', 'D_TIPUS_VIA', 'D_SENTITS_VIA',
-        'hour_sin', 'hour_cos', 'month_sin', 'month_cos', 'dow_sin', 'dow_cos',
-        'temperature', 'humidity', 'wind_speed', 'precipitation',
-        'is_foggy', 'is_daylight', 'rain_and_night', 'wind_and_ebre'
-    ]
-    
     try:
-        X_final = X_input[expected_cols]
-        probs = model.predict_proba(X_final)[:, 1]
+        # VARIABLES TEMPORALES
+        hour_sin = np.sin(2 * np.pi * hora / 24)
+        hour_cos = np.cos(2 * np.pi * hora / 24)
+
+        month = fecha.month
+        month_sin = np.sin(2 * np.pi * month / 12)
+        month_cos = np.cos(2 * np.pi * month / 12)
+
+        dayofweek = fecha.weekday()  # lunes=0, domingo=6
+        dow_sin = np.sin(2 * np.pi * dayofweek / 7)
+        dow_cos = np.cos(2 * np.pi * dayofweek / 7)
+
+        X = df_segments.copy()
+
+        # METEOROLOGÍA
+        # Simulacion de la temperatura segun el mes (pq no tenemos temperatura a tiempo real de meteocat: es de pago)
+        temperature = 15.0
+        if 11 <= month or month <= 2:
+            temperature = 7.0
+        if 6 <= month <= 8:
+            temperature = 27.0
+
+        humidity = 80.0 if clima['niebla'] or clima['lluvia'] else 55.0
+        precipitation = 2.5 if clima['lluvia'] else 0.0
+        wind_speed = 15.0 if clima['viento'] else 3.0
+
+        is_foggy = 1 if clima['niebla'] else 0
+        is_daylight = 1 if clima['luz'] else 0
+
+        # Nuevas features usadas por tu modelo
+        precip_last_3h = precipitation   # persistencia simple
+        wet_road = 1 if precipitation > 0 else 0
+        wet_and_night = wet_road * (1 - is_daylight)
+
+        # Zonas especiales del Ebre → viento
+        tramos_ebre = [290, 300, 310, 320, 330]
+        wind_and_ebre = [
+            wind_speed if pk in tramos_ebre else 0
+            for pk in X['segmento_pk']
+        ]
+
+        #  AÑADIMOS TODAS LAS VARIABLES
+        X['hour_sin'] = hour_sin
+        X['hour_cos'] = hour_cos
+        X['month_sin'] = month_sin
+        X['month_cos'] = month_cos
+        X['dow_sin'] = dow_sin
+        X['dow_cos'] = dow_cos
+        X['temperature'] = temperature
+        X['humidity'] = humidity
+        X['wind_speed'] = wind_speed
+        X['precipitation'] = precipitation
+        X['is_foggy'] = is_foggy
+        X['is_daylight'] = is_daylight
+        X['precip_last_3h'] = precip_last_3h
+        X['wet_road'] = wet_road
+        X['wet_and_night'] = wet_and_night
+        X['wind_and_ebre'] = wind_and_ebre
+
+        # ORDEN EXACTO DE FEATURES
+        expected_cols = [
+            'segmento_pk',
+            'C_VELOCITAT_VIA', 'D_TRACAT_ALTIMETRIC', 'D_TIPUS_VIA', 'D_SENTITS_VIA',
+            'hour_sin', 'hour_cos', 'month_sin', 'month_cos', 'dow_sin', 'dow_cos',
+            'temperature', 'humidity', 'wind_speed', 'precipitation',
+            'is_foggy', 'is_daylight', 'precip_last_3h', 'wet_road', 'wet_and_night',
+            'wind_and_ebre'
+        ]
+
+        X = X[expected_cols].astype(float)
+
+        # PREDICCIÓN
+        probs = model.predict_proba(X)[:, 1]
+
+        # AJUSTE POR CONDICIONES ADVERSAS (LLUVIA, NIEBLA, VIENTO) - Segun parametros DGT
+        factor_correccion = 1.0
+    
+        if clima['lluvia']:
+            factor_correccion += 0.30 # +30% de riesgo base por lluvia
+        if clima['niebla']:
+            factor_correccion += 0.25  # +25% de riesgo base por niebla
+        if clima['viento']:
+            factor_correccion += 0.10
+            
+        # Aplicamos factor pero limitamos a 1.0
+        probs = probs * factor_correccion
+        probs = np.clip(probs, 0, 1.0) # Que no pase del 100%
+
         return probs
+
     except Exception as e:
-        return []
+        st.error(f"ERROR en predict_risk_real(): {e}")
+        st.write("Columnas esperadas:", expected_cols)
+        st.write("Columnas reales recibidas:", list(df_segments.columns))
+        st.stop()
+
+    except Exception as e:
+        st.error(f"ERROR en predict_risk_real(): {e}")
+        st.write("Columnas del modelo:", model.get_booster().feature_names)
+        st.write("Columnas recibidas:", list(df_tramos.columns))
+        st.stop()
 
 # --- UI SIDEBAR ---
 with st.sidebar:
@@ -245,7 +297,8 @@ if model is not None:
         df_tramos['probabilidad'] = riesgos_actuales
 
         # Filtro PK
-        df_tramos = df_tramos[(df_tramos['segmento_pk'] >= pk_min) & (df_tramos['segmento_pk'] <= pk_max)]
+        pk_lower, pk_upper = rango_pk
+        df_tramos = df_tramos[(df_tramos['segmento_pk'] >= pk_lower) & (df_tramos['segmento_pk'] <= pk_upper)]
         
         def get_color(p):
             if p > 0.50: return 'darkred'
@@ -290,7 +343,7 @@ if model is not None:
             # Dibujar tramos con riesgo (circulos)    
             for _, row in df_tramos.iterrows():
                 # Filtramos para dibujar solo lo seleccionado en el slider
-                if pk_min <= row['segmento_pk'] <= pk_max:
+                if pk_lower <= row['segmento_pk'] <= pk_upper:
                     folium.Circle(
                         location=[row['lat'], row['lon']],
                         radius=4000, 

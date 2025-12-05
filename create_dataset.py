@@ -164,9 +164,9 @@ def integrate_police_overrides(final_df, accidents_df):
     acc_slim = accidents_df[cols_dynamic].drop_duplicates(subset=['timestamp_hora', 'segmento_pk'])
     final_df = final_df.merge(acc_slim, on=['timestamp_hora', 'segmento_pk'], how='left')
     
-    # Lógica de corrección
-    rain_mask = final_df['D_CLIMATOLOGIA'].str.contains('Pluja|tempesta', case=False, na=False)
-    final_df.loc[rain_mask, 'precipitation'] = final_df.loc[rain_mask, 'precipitation'].apply(lambda x: max(x if pd.notnull(x) else 0, 1.0))
+    #! ELIMINAR OVERRIDE DE LLUVIA (DA RIESGO ALTISIMO SIEMPRE)
+    # rain_mask = final_df['D_CLIMATOLOGIA'].str.contains('Pluja|tempesta', case=False, na=False)
+    # final_df.loc[rain_mask, 'precipitation'] = final_df.loc[rain_mask, 'precipitation'].apply(lambda x: max(x if pd.notnull(x) else 0, 1.0))
     
     final_df['is_foggy'] = 0
     final_df.loc[final_df['D_BOIRA'].str.contains('Boira', case=False, na=False), 'is_foggy'] = 1
@@ -182,13 +182,26 @@ def integrate_police_overrides(final_df, accidents_df):
 
 def add_feature_crosses(df):
     print("Generating Feature Crosses...")
-    # Tu nueva lógica implementada aquí directamente
-    if 'is_daylight' in df.columns and 'precipitation' in df.columns:
-        df['rain_and_night'] = df['precipitation'] * (1 - df['is_daylight'])
+    # Asegurar orden para el cálculo de ventanas
+    df = df.sort_values(['station_id', 'timestamp_hora'])
+    
+    # ACUMULADO DE LLUVIA (3 HORAS)
+    # Si llovió hace 2 horas, el suelo sigue mojado. Esto suaviza el 0 vs 1.
+    df['precip_last_3h'] = df.groupby('station_id')['precipitation'].transform(
+        lambda x: x.rolling(window=3, min_periods=1).max()
+    )
+    
+    # Variable binaria más robusta (Suelo Mojado)
+    # Asumimos suelo mojado si ha llovido > 0.1mm en las últimas 3 horas
+    df['wet_road'] = (df['precip_last_3h'] > 0.1).astype(int)
+    
+    if 'is_daylight' in df.columns:
+        df['wet_and_night'] = df['wet_road'] * (1 - df['is_daylight'])
         
     critical_segments = [290, 300, 310, 320, 330]
     if 'wind_speed' in df.columns and 'segmento_pk' in df.columns:
         df['wind_and_ebre'] = df['wind_speed'] * df['segmento_pk'].isin(critical_segments).astype(int)
+    
     return df
 
 # --- 6. ENCODING Y MAIN ---
