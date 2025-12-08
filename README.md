@@ -9,9 +9,11 @@ A Machine Learning powered dashboard that predicts the probability of traffic ac
 <div align="center">
 
 ## 🔴 **Live Demo**
-Explore the interactive dashboard here:
+Click the image below to launch the interactive dashboard:
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://predict-vehicle-accidents.streamlit.app/)
+[![AP-7 Accident Risk Dashboard](dashboard_preview.png)](https://predict-vehicle-accidents.streamlit.app/)
+
+*Explore real-time risk heatmaps, weather simulation, and 24h forecasts.*
 
 </div>
 
