@@ -1,3 +1,6 @@
+I forked this repositoy for my personal future projects from https://github.com/adrianaavilees/Vehicle-Accident-Predictor
+Thanks Adriana for inpire the comunity with thism great project
+
 # 🚔 AP-7 Highway Accident Risk Prediction System
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
